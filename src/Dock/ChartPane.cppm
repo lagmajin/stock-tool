@@ -12,6 +12,7 @@ module;
 #include <QSizePolicy>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -25,22 +26,29 @@ namespace {
 class PlotCanvas final : public QWidget {
 public:
   explicit PlotCanvas(QWidget *parent = nullptr) : QWidget(parent) {
-    setMinimumHeight(320);
+    setMinimumHeight(170);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   }
 
-  void setSeries(QString title, std::vector<double> actual,
-                 std::vector<double> fitted) {
+  void setComparisonSeries(QString title, std::vector<double> primary,
+                           std::vector<double> secondary) {
     title_ = std::move(title);
-    actual_ = std::move(actual);
-    fitted_ = std::move(fitted);
+    primary_ = std::move(primary);
+    secondary_ = std::move(secondary);
+    update();
+  }
+
+  void setSingleSeries(QString title, std::vector<double> primary) {
+    title_ = std::move(title);
+    primary_ = std::move(primary);
+    secondary_.clear();
     update();
   }
 
   void clearSeries() {
     title_.clear();
-    actual_.clear();
-    fitted_.clear();
+    primary_.clear();
+    secondary_.clear();
     update();
   }
 
@@ -56,32 +64,36 @@ protected:
 
     painter.setPen(QPen(QColor(225, 230, 238), 1));
     QFont titleFont = painter.font();
-    titleFont.setPointSize(11);
+    titleFont.setPointSize(10);
     titleFont.setBold(true);
     painter.setFont(titleFont);
     painter.drawText(QRectF(12, 8, width() - 24, 20), title_);
 
-    if (actual_.empty() || fitted_.empty()) {
+    if (primary_.empty()) {
       painter.setPen(QColor(160, 168, 180));
-      painter.setFont(QFont(painter.font().family(), 10));
-      painter.drawText(plotRect.adjusted(16, 16, -16, -16),
-                       Qt::AlignCenter, "Load a CSV or fetch web data to see\nactual vs fitted returns.");
+      painter.setFont(QFont(painter.font().family(), 9));
+      painter.drawText(plotRect.adjusted(16, 16, -16, -16), Qt::AlignCenter,
+                       "No series loaded yet.");
       return;
     }
 
-    const std::size_t count = std::min(actual_.size(), fitted_.size());
+    const std::size_t count = primary_.size();
     if (count < 2) {
       painter.setPen(QColor(160, 168, 180));
-      painter.drawText(plotRect.adjusted(16, 16, -16, -16),
-                       Qt::AlignCenter, "Not enough data to plot.");
+      painter.drawText(plotRect.adjusted(16, 16, -16, -16), Qt::AlignCenter,
+                       "Not enough data to plot.");
       return;
     }
 
     double minValue = std::numeric_limits<double>::max();
     double maxValue = std::numeric_limits<double>::lowest();
     for (std::size_t i = 0; i < count; ++i) {
-      minValue = std::min({minValue, actual_[i], fitted_[i]});
-      maxValue = std::max({maxValue, actual_[i], fitted_[i]});
+      minValue = std::min(minValue, primary_[i]);
+      maxValue = std::max(maxValue, primary_[i]);
+      if (i < secondary_.size()) {
+        minValue = std::min(minValue, secondary_[i]);
+        maxValue = std::max(maxValue, secondary_[i]);
+      }
     }
 
     if (std::abs(maxValue - minValue) < 1e-9) {
@@ -99,12 +111,18 @@ protected:
     };
 
     painter.setPen(QPen(QColor(90, 98, 112), 1, Qt::DashLine));
-    painter.drawLine(QPointF(plotRect.left(), plotRect.bottom()),
-                     QPointF(plotRect.right(), plotRect.bottom()));
+    if (minValue < 0.0 && maxValue > 0.0) {
+      const double zeroY = plotRect.bottom() -
+                           ((0.0 - minValue) / (maxValue - minValue)) *
+                               plotRect.height();
+      painter.drawLine(QPointF(plotRect.left(), zeroY),
+                       QPointF(plotRect.right(), zeroY));
+    }
     painter.drawLine(QPointF(plotRect.left(), plotRect.top()),
                      QPointF(plotRect.left(), plotRect.bottom()));
 
-    auto drawPolyline = [&](const std::vector<double> &series, const QColor &color) {
+    auto drawPolyline = [&](const std::vector<double> &series,
+                            const QColor &color) {
       QPainterPath path;
       path.moveTo(toPoint(0, series[0]));
       for (std::size_t i = 1; i < count; ++i) {
@@ -114,16 +132,26 @@ protected:
       painter.drawPath(path);
     };
 
-    drawPolyline(actual_, QColor(66, 153, 225));
-    drawPolyline(fitted_, QColor(237, 137, 54));
+    drawPolyline(primary_, QColor(66, 153, 225));
+    if (!secondary_.empty()) {
+      drawPolyline(secondary_, QColor(237, 137, 54));
+    }
 
     painter.setPen(QColor(210, 214, 220));
-    painter.setFont(QFont(painter.font().family(), 9));
-    painter.drawText(QRectF(plotRect.left(), 2, 110, 18), "Actual");
-    painter.fillRect(QRectF(plotRect.left() + 114, 6, 12, 12), QColor(66, 153, 225));
-    painter.drawText(QRectF(plotRect.left() + 132, 2, 110, 18), "Fitted");
-    painter.fillRect(QRectF(plotRect.left() + 190, 6, 12, 12), QColor(237, 137, 54));
-    painter.drawText(QRectF(plotRect.right() - 128, 2, 128, 18),
+    painter.setFont(QFont(painter.font().family(), 8));
+    if (secondary_.empty()) {
+      painter.drawText(QRectF(plotRect.left(), 2, 100, 16), "Residual");
+      painter.fillRect(QRectF(plotRect.left() + 82, 6, 12, 12),
+                       QColor(66, 153, 225));
+    } else {
+      painter.drawText(QRectF(plotRect.left(), 2, 110, 16), "Actual");
+      painter.fillRect(QRectF(plotRect.left() + 114, 6, 12, 12),
+                       QColor(66, 153, 225));
+      painter.drawText(QRectF(plotRect.left() + 132, 2, 110, 16), "Fitted");
+      painter.fillRect(QRectF(plotRect.left() + 190, 6, 12, 12),
+                       QColor(237, 137, 54));
+    }
+    painter.drawText(QRectF(plotRect.right() - 128, 2, 128, 16),
                      QString("Range %1 .. %2")
                          .arg(QString::number(minValue * 100.0, 'f', 2),
                               QString::number(maxValue * 100.0, 'f', 2)));
@@ -131,8 +159,8 @@ protected:
 
 private:
   QString title_;
-  std::vector<double> actual_;
-  std::vector<double> fitted_;
+  std::vector<double> primary_;
+  std::vector<double> secondary_;
 };
 
 } // namespace
@@ -141,7 +169,8 @@ class ChartPane::Impl {
 public:
   QLabel *symbolLabel = nullptr;
   QLabel *detailLabel = nullptr;
-  PlotCanvas *canvas = nullptr;
+  PlotCanvas *comparisonCanvas = nullptr;
+  PlotCanvas *residualCanvas = nullptr;
 };
 
 ChartPane::ChartPane(QWidget *parent) : QWidget(parent), impl_(new Impl()) {
@@ -156,7 +185,7 @@ ChartPane::ChartPane(QWidget *parent) : QWidget(parent), impl_(new Impl()) {
 
   auto *surface = new QFrame(this);
   surface->setFrameShape(QFrame::StyledPanel);
-  surface->setMinimumHeight(360);
+  surface->setMinimumHeight(420);
 
   auto *surfaceLayout = new QGridLayout(surface);
   surfaceLayout->setContentsMargins(10, 10, 10, 10);
@@ -174,13 +203,18 @@ ChartPane::ChartPane(QWidget *parent) : QWidget(parent), impl_(new Impl()) {
   detailLabel->setWordWrap(true);
   impl_->detailLabel = detailLabel;
 
-  auto *canvas = new PlotCanvas(surface);
-  impl_->canvas = canvas;
+  auto *comparisonCanvas = new PlotCanvas(surface);
+  impl_->comparisonCanvas = comparisonCanvas;
+
+  auto *residualCanvas = new PlotCanvas(surface);
+  impl_->residualCanvas = residualCanvas;
 
   surfaceLayout->addWidget(symbolLabel, 0, 0);
   surfaceLayout->addWidget(detailLabel, 1, 0);
-  surfaceLayout->addWidget(canvas, 2, 0);
+  surfaceLayout->addWidget(comparisonCanvas, 2, 0);
+  surfaceLayout->addWidget(residualCanvas, 3, 0);
   surfaceLayout->setRowStretch(2, 1);
+  surfaceLayout->setRowStretch(3, 1);
 
   layout->addWidget(title);
   layout->addWidget(surface, 1);
@@ -198,8 +232,11 @@ void ChartPane::setSymbol(const QString &symbol) {
     impl_->symbolLabel->setText("No symbol selected");
     impl_->detailLabel->setText(
         "Chart placeholder\n\nCandlestick / volume / overlays later");
-    if (impl_->canvas) {
-      impl_->canvas->clearSeries();
+    if (impl_->comparisonCanvas) {
+      impl_->comparisonCanvas->clearSeries();
+    }
+    if (impl_->residualCanvas) {
+      impl_->residualCanvas->clearSeries();
     }
     return;
   }
@@ -217,13 +254,16 @@ void ChartPane::setSymbol(const QString &symbol) {
 void ChartPane::setFactorModelResult(
     const QString &contextLabel,
     const StockTool::Domain::FactorModelResult &result) {
-  if (!impl_->canvas || !impl_->detailLabel) {
+  if (!impl_->comparisonCanvas || !impl_->residualCanvas ||
+      !impl_->detailLabel) {
     return;
   }
 
-  impl_->canvas->setSeries(
+  impl_->comparisonCanvas->setComparisonSeries(
       QString("%1 actual vs fitted returns").arg(contextLabel),
       result.fitSeries.actualReturns, result.fitSeries.fittedReturns);
+  impl_->residualCanvas->setSingleSeries(
+      QString("%1 residuals").arg(contextLabel), result.fitSeries.residuals);
 
   impl_->detailLabel->setText(
       QString("R squared: %1\nResidual alpha/day: %2\nResidual volatility: %3")
@@ -233,8 +273,11 @@ void ChartPane::setFactorModelResult(
 }
 
 void ChartPane::clearModelResult() {
-  if (impl_->canvas) {
-    impl_->canvas->clearSeries();
+  if (impl_->comparisonCanvas) {
+    impl_->comparisonCanvas->clearSeries();
+  }
+  if (impl_->residualCanvas) {
+    impl_->residualCanvas->clearSeries();
   }
   if (impl_->detailLabel) {
     impl_->detailLabel->setText(
