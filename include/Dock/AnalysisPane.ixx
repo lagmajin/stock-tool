@@ -2,6 +2,7 @@ module;
 
 #include <QComboBox>
 #include <QFutureWatcher>
+#include <functional>
 #include <QString>
 #include <QLineEdit>
 #include <QWidget>
@@ -22,6 +23,10 @@ public:
   ~AnalysisPane() override;
 
   void setSymbol(const QString &symbol);
+  void setResultHandler(
+      std::function<void(const QString &label,
+                         const StockTool::Domain::FactorModelResult &result)>
+          handler);
 
 private:
   void recalcFromCurrentContext();

@@ -178,6 +178,8 @@ WebFetchResult fetchWebFactorCsvAsync(StockTool::Domain::MarketProvider provider
 
 class AnalysisPane::Impl {
 public:
+  std::function<void(const QString &,
+                     const StockTool::Domain::FactorModelResult &)> resultHandler;
   QLabel *titleLabel = nullptr;
   QLabel *sourceLabel = nullptr;
   QComboBox *providerBox = nullptr;
@@ -323,6 +325,12 @@ AnalysisPane::AnalysisPane(QWidget *parent)
 
 AnalysisPane::~AnalysisPane() { delete impl_; }
 
+void AnalysisPane::setResultHandler(
+    std::function<void(const QString &,
+                       const StockTool::Domain::FactorModelResult &)> handler) {
+  impl_->resultHandler = std::move(handler);
+}
+
 void AnalysisPane::setSymbol(const QString &symbol) {
   impl_->selectedSymbol = symbol.trimmed().toUpper();
   if (impl_->selectedSymbol.isEmpty()) {
@@ -415,6 +423,9 @@ void AnalysisPane::renderResult(const FactorModelResult &result,
 
   if (!result.ok) {
     impl_->notes->setPlainText(QString::fromStdString(result.error));
+    if (impl_->resultHandler) {
+      impl_->resultHandler(contextLabel, result);
+    }
     return;
   }
 
@@ -463,6 +474,10 @@ void AnalysisPane::renderResult(const FactorModelResult &result,
                 .arg(leadFactor, formatPercent(result.rSquared));
 
   impl_->notes->setPlainText(summary);
+
+  if (impl_->resultHandler) {
+    impl_->resultHandler(contextLabel, result);
+  }
 }
 
 } // namespace StockTool::Dock

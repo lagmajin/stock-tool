@@ -256,6 +256,18 @@ MainWindow::MainWindow(QWidget *parent)
                              2500);
   });
   impl_->watchListPane->setOpenSymbolHandler(openSymbol);
+  impl_->analysisPane->setResultHandler(
+      [this](const QString &contextLabel,
+             const StockTool::Domain::FactorModelResult &result) {
+        if (!impl_->chartPane) {
+          return;
+        }
+        if (result.ok) {
+          impl_->chartPane->setFactorModelResult(contextLabel, result);
+        } else {
+          impl_->chartPane->clearModelResult();
+        }
+      });
 
   QTimer::singleShot(0, this, [this]() {
     if (!restoreLayout(impl_->dockManager)) {

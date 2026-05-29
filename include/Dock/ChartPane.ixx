@@ -1,9 +1,12 @@
 module;
 
+#include <functional>
 #include <QString>
 #include <QWidget>
 
 export module Dock.ChartPane;
+
+import Domain.FactorModel;
 
 export namespace StockTool::Dock {
 
@@ -17,6 +20,10 @@ public:
   ~ChartPane() override;
 
   void setSymbol(const QString &symbol);
+  void setFactorModelResult(
+      const QString &contextLabel,
+      const StockTool::Domain::FactorModelResult &result);
+  void clearModelResult();
 };
 
 } // namespace StockTool::Dock
