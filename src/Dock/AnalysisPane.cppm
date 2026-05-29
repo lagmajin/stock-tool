@@ -61,6 +61,13 @@ struct WebFetchResult {
   QString statusMessage;
 };
 
+struct ExposureSnapshot {
+  QString leadFactor;
+  QStringList hiddenFactors;
+  QString proxyLabel;
+  double proxyScore = 0.0;
+};
+
 FactorModelResult runSampleFactorModel(const QString &symbol) {
   FactorSpec spec;
   spec.factorNames = {"TOPIX", "USDJPY", "NASDAQ100", "China", "VIX"};
@@ -172,6 +179,63 @@ WebFetchResult fetchWebFactorCsvAsync(StockTool::Domain::MarketProvider provider
   result.data = fetchWebFactorCsv(provider, targetSymbol, factorSymbols,
                                   &result.statusMessage);
   return result;
+}
+
+ExposureSnapshot summarizeExposure(const FactorModelResult &result) {
+  ExposureSnapshot snapshot;
+  if (!result.ok || result.exposures.empty()) {
+    return snapshot;
+  }
+
+  std::vector<StockTool::Domain::FactorExposure> sorted = result.exposures;
+  std::sort(sorted.begin(), sorted.end(), [](const auto &lhs, const auto &rhs) {
+    return std::abs(lhs.beta) > std::abs(rhs.beta);
+  });
+
+  snapshot.leadFactor = QString::fromStdString(sorted.front().name);
+  const int hiddenCount = std::min<int>(3, static_cast<int>(sorted.size()));
+  for (int i = 1; i < hiddenCount; ++i) {
+    snapshot.hiddenFactors << QString::fromStdString(sorted[static_cast<std::size_t>(i)].name);
+  }
+
+  const QString leadUpper = snapshot.leadFactor.toUpper();
+  const bool isTechProxy = leadUpper.contains("NASDAQ") || leadUpper.contains("SOXX") ||
+                           leadUpper.contains("VIX");
+  const bool isJapanProxy = leadUpper.contains("TOPIX") || leadUpper.contains("NIKKEI");
+  const bool isChinaProxy = leadUpper.contains("CHINA");
+  const bool isCurrencyProxy = leadUpper.contains("USD") || leadUpper.contains("JPY");
+
+  const double fit = result.rSquared;
+  const double leadAbs = std::abs(sorted.front().beta);
+  snapshot.proxyScore = std::clamp((fit * 0.7) + (std::min(leadAbs, 2.0) / 2.0) * 0.3,
+                                   0.0, 1.0);
+
+  if (fit >= 0.7 && leadAbs >= 1.0) {
+    if (isTechProxy) {
+      snapshot.proxyLabel = "Degraded NASDAQ / theme proxy";
+    } else if (isJapanProxy) {
+      snapshot.proxyLabel = "Japan equity / local risk proxy";
+    } else if (isChinaProxy) {
+      snapshot.proxyLabel = "China cycle proxy";
+    } else if (isCurrencyProxy) {
+      snapshot.proxyLabel = "Currency proxy";
+    } else {
+      snapshot.proxyLabel = "Composite risk proxy";
+    }
+  } else if (fit >= 0.5) {
+    snapshot.proxyLabel = "Mixed composite";
+  } else {
+    snapshot.proxyLabel = "Weakly explained / residual-heavy";
+  }
+
+  return snapshot;
+}
+
+QString hiddenBetaText(const ExposureSnapshot &snapshot) {
+  if (snapshot.hiddenFactors.isEmpty()) {
+    return "Hidden beta: not enough data";
+  }
+  return QString("Hidden beta: %1").arg(snapshot.hiddenFactors.join(", "));
 }
 
 } // namespace
@@ -458,6 +522,8 @@ void AnalysisPane::renderResult(const FactorModelResult &result,
     leadFactor = QString::fromStdString(strongest->name);
   }
 
+  const ExposureSnapshot snapshot = summarizeExposure(result);
+
   const QString summary =
       impl_->loadedCsv.ok
           ? QString("%1\n\nRows of return data: %2\nLead factor: %3\nModel fit: %4\n"
@@ -474,6 +540,10 @@ void AnalysisPane::renderResult(const FactorModelResult &result,
                 .arg(leadFactor, formatPercent(result.rSquared));
 
   impl_->notes->setPlainText(summary);
+  impl_->notes->append("");
+  impl_->notes->append(QString("Proxy score: %1").arg(QString::number(snapshot.proxyScore * 100.0, 'f', 1)));
+  impl_->notes->append(snapshot.proxyLabel);
+  impl_->notes->append(hiddenBetaText(snapshot));
 
   if (impl_->resultHandler) {
     impl_->resultHandler(contextLabel, result);

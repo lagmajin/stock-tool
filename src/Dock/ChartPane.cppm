@@ -9,8 +9,11 @@ module;
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
+#include <QRectF>
 #include <QSizePolicy>
+#include <QStringList>
 #include <QVBoxLayout>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -19,9 +22,48 @@ module;
 module Dock.ChartPane;
 
 import Dock.ChartPane;
+import Domain.FactorModel;
 
 namespace StockTool::Dock {
 namespace {
+
+QString exposureSummary(const StockTool::Domain::FactorModelResult &result) {
+  if (!result.ok || result.exposures.empty()) {
+    return "No exposure summary available.";
+  }
+
+  auto sorted = result.exposures;
+  std::sort(sorted.begin(), sorted.end(), [](const auto &lhs, const auto &rhs) {
+    return std::abs(lhs.beta) > std::abs(rhs.beta);
+  });
+
+  const int topCount = std::min<int>(3, static_cast<int>(sorted.size()));
+  QStringList topFactors;
+  for (int i = 0; i < topCount; ++i) {
+    topFactors << QString::fromStdString(sorted[static_cast<std::size_t>(i)].name);
+  }
+
+  const QString lead = QString::fromStdString(sorted.front().name);
+  const QString leadUpper = lead.toUpper();
+
+  QString proxyLabel = "Composite risk proxy";
+  if (leadUpper.contains("NASDAQ") || leadUpper.contains("SOXX")) {
+    proxyLabel = "Degraded NASDAQ / theme proxy";
+  } else if (leadUpper.contains("TOPIX") || leadUpper.contains("NIKKEI")) {
+    proxyLabel = "Japan equity proxy";
+  } else if (leadUpper.contains("CHINA")) {
+    proxyLabel = "China cycle proxy";
+  } else if (leadUpper.contains("USD") || leadUpper.contains("JPY")) {
+    proxyLabel = "Currency proxy";
+  } else if (leadUpper.contains("VIX")) {
+    proxyLabel = "Risk-off proxy";
+  }
+
+  return QString("%1\nTop betas: %2\nFit: %3\nResidual drift: %4")
+      .arg(proxyLabel, topFactors.join(", "),
+           QString::number(result.rSquared * 100.0, 'f', 1),
+           QString::number(result.residualMean * 100.0, 'f', 2));
+}
 
 class PlotCanvas final : public QWidget {
 public:
@@ -58,7 +100,7 @@ protected:
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.fillRect(rect(), QColor(22, 24, 28));
 
-    const QRectF plotRect = QRectF(54, 24, width() - 76, height() - 68);
+    const QRectF plotRect(54, 24, width() - 76, height() - 68);
     painter.setPen(QPen(QColor(64, 70, 82), 1));
     painter.drawRect(plotRect);
 
@@ -77,8 +119,7 @@ protected:
       return;
     }
 
-    const std::size_t count = primary_.size();
-    if (count < 2) {
+    if (primary_.size() < 2) {
       painter.setPen(QColor(160, 168, 180));
       painter.drawText(plotRect.adjusted(16, 16, -16, -16), Qt::AlignCenter,
                        "Not enough data to plot.");
@@ -87,7 +128,7 @@ protected:
 
     double minValue = std::numeric_limits<double>::max();
     double maxValue = std::numeric_limits<double>::lowest();
-    for (std::size_t i = 0; i < count; ++i) {
+    for (std::size_t i = 0; i < primary_.size(); ++i) {
       minValue = std::min(minValue, primary_[i]);
       maxValue = std::max(maxValue, primary_[i]);
       if (i < secondary_.size()) {
@@ -96,17 +137,18 @@ protected:
       }
     }
 
-    if (std::abs(maxValue - minValue) < 1e-9) {
+    if (std::abs(maxValue - minValue) < 1e-12) {
       maxValue += 0.0001;
       minValue -= 0.0001;
     }
 
-    const auto toPoint = [&](std::size_t index, double value) {
+    const auto mapPoint = [&](std::size_t index, double value) {
       const double x = plotRect.left() +
-                       (static_cast<double>(index) / static_cast<double>(count - 1)) *
+                       (static_cast<double>(index) /
+                        static_cast<double>(primary_.size() - 1)) *
                            plotRect.width();
-      const double t = (value - minValue) / (maxValue - minValue);
-      const double y = plotRect.bottom() - t * plotRect.height();
+      const double ratio = (value - minValue) / (maxValue - minValue);
+      const double y = plotRect.bottom() - ratio * plotRect.height();
       return QPointF(x, y);
     };
 
@@ -118,15 +160,16 @@ protected:
       painter.drawLine(QPointF(plotRect.left(), zeroY),
                        QPointF(plotRect.right(), zeroY));
     }
+
     painter.drawLine(QPointF(plotRect.left(), plotRect.top()),
                      QPointF(plotRect.left(), plotRect.bottom()));
 
-    auto drawPolyline = [&](const std::vector<double> &series,
-                            const QColor &color) {
+    const auto drawPolyline = [&](const std::vector<double> &series,
+                                  const QColor &color) {
       QPainterPath path;
-      path.moveTo(toPoint(0, series[0]));
-      for (std::size_t i = 1; i < count; ++i) {
-        path.lineTo(toPoint(i, series[i]));
+      path.moveTo(mapPoint(0, series[0]));
+      for (std::size_t i = 1; i < primary_.size(); ++i) {
+        path.lineTo(mapPoint(i, series[i]));
       }
       painter.setPen(QPen(color, 2));
       painter.drawPath(path);
@@ -140,7 +183,7 @@ protected:
     painter.setPen(QColor(210, 214, 220));
     painter.setFont(QFont(painter.font().family(), 8));
     if (secondary_.empty()) {
-      painter.drawText(QRectF(plotRect.left(), 2, 100, 16), "Residual");
+      painter.drawText(QRectF(plotRect.left(), 2, 110, 16), "Residual");
       painter.fillRect(QRectF(plotRect.left() + 82, 6, 12, 12),
                        QColor(66, 153, 225));
     } else {
@@ -151,6 +194,7 @@ protected:
       painter.fillRect(QRectF(plotRect.left() + 190, 6, 12, 12),
                        QColor(237, 137, 54));
     }
+
     painter.drawText(QRectF(plotRect.right() - 128, 2, 128, 16),
                      QString("Range %1 .. %2")
                          .arg(QString::number(minValue * 100.0, 'f', 2),
@@ -162,6 +206,10 @@ private:
   std::vector<double> primary_;
   std::vector<double> secondary_;
 };
+
+QString defaultPlaceholder() {
+  return "Chart placeholder\n\nCandlestick / volume / overlays later";
+}
 
 } // namespace
 
@@ -198,9 +246,9 @@ ChartPane::ChartPane(QWidget *parent) : QWidget(parent), impl_(new Impl()) {
   symbolLabel->setFont(symbolFont);
   impl_->symbolLabel = symbolLabel;
 
-  auto *detailLabel = new QLabel(
-      "Chart placeholder\n\nCandlestick / volume / overlays later", surface);
+  auto *detailLabel = new QLabel(defaultPlaceholder(), surface);
   detailLabel->setWordWrap(true);
+  detailLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
   impl_->detailLabel = detailLabel;
 
   auto *comparisonCanvas = new PlotCanvas(surface);
@@ -230,8 +278,7 @@ void ChartPane::setSymbol(const QString &symbol) {
 
   if (normalized.isEmpty()) {
     impl_->symbolLabel->setText("No symbol selected");
-    impl_->detailLabel->setText(
-        "Chart placeholder\n\nCandlestick / volume / overlays later");
+    impl_->detailLabel->setText(defaultPlaceholder());
     if (impl_->comparisonCanvas) {
       impl_->comparisonCanvas->clearSeries();
     }
@@ -265,11 +312,15 @@ void ChartPane::setFactorModelResult(
   impl_->residualCanvas->setSingleSeries(
       QString("%1 residuals").arg(contextLabel), result.fitSeries.residuals);
 
-  impl_->detailLabel->setText(
-      QString("R squared: %1\nResidual alpha/day: %2\nResidual volatility: %3")
-          .arg(QString::number(result.rSquared * 100.0, 'f', 2),
-               QString::number(result.residualMean * 100.0, 'f', 2),
-               QString::number(result.residualStdDev * 100.0, 'f', 2)));
+  QString details = QString("R squared: %1\nResidual alpha/day: %2\n"
+                            "Residual volatility: %3\nVerdict: %4")
+                        .arg(QString::number(result.rSquared * 100.0, 'f', 2),
+                             QString::number(result.residualMean * 100.0, 'f', 2),
+                             QString::number(result.residualStdDev * 100.0, 'f', 2),
+                             QString::fromStdString(result.verdict));
+  details += "\n\n";
+  details += exposureSummary(result);
+  impl_->detailLabel->setText(details);
 }
 
 void ChartPane::clearModelResult() {
@@ -280,8 +331,7 @@ void ChartPane::clearModelResult() {
     impl_->residualCanvas->clearSeries();
   }
   if (impl_->detailLabel) {
-    impl_->detailLabel->setText(
-        "Chart placeholder\n\nCandlestick / volume / overlays later");
+    impl_->detailLabel->setText(defaultPlaceholder());
   }
 }
 
