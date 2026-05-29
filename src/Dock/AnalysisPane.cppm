@@ -1,5 +1,8 @@
 module;
 
+#include <QApplication>
+#include <QComboBox>
+#include <QEventLoop>
 #include <QAbstractItemView>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -7,6 +10,8 @@ module;
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QRegularExpression>
 #include <QString>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -22,6 +27,7 @@ module Dock.AnalysisPane;
 
 import Dock.AnalysisPane;
 import Domain.FactorModel;
+import Domain.MarketData;
 import Domain.PriceCsv;
 
 namespace StockTool::Dock {
@@ -44,6 +50,10 @@ QString formatPathLabel(const QString &path) {
     return "No CSV loaded";
   }
   return QFileInfo(path).fileName();
+}
+
+QStringList splitSymbols(const QString &text) {
+  return text.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
 }
 
 FactorModelResult runSampleFactorModel(const QString &symbol) {
@@ -94,16 +104,76 @@ FactorModelResult runCsvFactorModel(const StockTool::Domain::PriceCsvData &data)
   return StockTool::Domain::runFactorRegression(spec, rows);
 }
 
+StockTool::Domain::PriceCsvData fetchWebFactorCsv(
+    StockTool::Domain::MarketProvider provider, const QString &targetSymbol,
+    const QStringList &factorSymbols, QString *statusMessage) {
+  using namespace StockTool::Domain;
+
+  const QString normalizedTarget = normalizeMarketSymbol(provider, targetSymbol);
+  if (normalizedTarget.trimmed().isEmpty()) {
+    if (statusMessage) {
+      *statusMessage = "Target symbol is empty";
+    }
+    return {};
+  }
+
+  MarketSeries targetSeries = fetchCloseSeries(provider, normalizedTarget);
+  if (!targetSeries.ok) {
+    if (statusMessage) {
+      *statusMessage = targetSeries.error;
+    }
+    return {};
+  }
+
+  std::vector<MarketSeries> factorSeries;
+  factorSeries.reserve(factorSymbols.size());
+  QStringList normalizedFactorNames;
+  for (const QString &factor : factorSymbols) {
+    const QString normalizedFactor = normalizeMarketSymbol(provider, factor);
+    if (normalizedFactor.trimmed().isEmpty()) {
+      continue;
+    }
+    MarketSeries series = fetchCloseSeries(provider, normalizedFactor);
+    if (!series.ok) {
+      if (statusMessage) {
+        *statusMessage = QString("%1: %2").arg(normalizedFactor, series.error);
+      }
+      return {};
+    }
+    normalizedFactorNames << normalizedFactor;
+    factorSeries.push_back(std::move(series));
+  }
+
+  if (factorSeries.empty()) {
+    if (statusMessage) {
+      *statusMessage = "Please provide at least one factor symbol";
+    }
+    return {};
+  }
+
+  PriceCsvData data = buildPriceCsvFromSeries(
+      QString("%1/%2").arg(marketProviderToString(provider), normalizedTarget),
+      targetSeries, normalizedFactorNames, factorSeries);
+  if (!data.ok && statusMessage) {
+    *statusMessage = data.error;
+  }
+  return data;
+}
+
 } // namespace
 
 class AnalysisPane::Impl {
 public:
   QLabel *titleLabel = nullptr;
   QLabel *sourceLabel = nullptr;
+  QComboBox *providerBox = nullptr;
+  QLineEdit *targetEdit = nullptr;
+  QLineEdit *factorsEdit = nullptr;
   QTableWidget *table = nullptr;
   QTextEdit *notes = nullptr;
   QToolButton *loadButton = nullptr;
   QToolButton *recalcButton = nullptr;
+  QToolButton *webFetchButton = nullptr;
   StockTool::Domain::PriceCsvData loadedCsv;
   QString selectedSymbol;
   QString loadedPath;
@@ -142,6 +212,33 @@ AnalysisPane::AnalysisPane(QWidget *parent)
   toolbar->addWidget(recalcButton);
   toolbar->addWidget(sourceLabel, 1);
 
+  auto *webRow = new QHBoxLayout();
+  webRow->setSpacing(8);
+
+  auto *providerBox = new QComboBox(this);
+  providerBox->addItem("Stooq", QVariant::fromValue(0));
+  providerBox->addItem("Yahoo Finance", QVariant::fromValue(1));
+  impl_->providerBox = providerBox;
+
+  auto *targetEdit = new QLineEdit(this);
+  targetEdit->setPlaceholderText("Target symbol");
+  targetEdit->setText("7203");
+  impl_->targetEdit = targetEdit;
+
+  auto *factorsEdit = new QLineEdit(this);
+  factorsEdit->setPlaceholderText("Factor symbols separated by comma");
+  factorsEdit->setText("^GSPC,^IXIC,USDJPY=X");
+  impl_->factorsEdit = factorsEdit;
+
+  auto *webFetchButton = new QToolButton(this);
+  webFetchButton->setText("Fetch Web");
+  impl_->webFetchButton = webFetchButton;
+
+  webRow->addWidget(providerBox);
+  webRow->addWidget(targetEdit, 1);
+  webRow->addWidget(factorsEdit, 2);
+  webRow->addWidget(webFetchButton);
+
   auto *table = new QTableWidget(0, 2, this);
   impl_->table = table;
   table->setHorizontalHeaderLabels({"Metric", "Value"});
@@ -160,6 +257,7 @@ AnalysisPane::AnalysisPane(QWidget *parent)
 
   layout->addWidget(title);
   layout->addLayout(toolbar);
+  layout->addLayout(webRow);
   layout->addWidget(table);
   layout->addWidget(notes, 1);
 
@@ -185,6 +283,9 @@ AnalysisPane::AnalysisPane(QWidget *parent)
 
   connect(recalcButton, &QToolButton::clicked, this,
           [this]() { recalcFromCurrentContext(); });
+
+  connect(webFetchButton, &QToolButton::clicked, this,
+          [this]() { loadFromWebSource(); });
 }
 
 AnalysisPane::~AnalysisPane() { delete impl_; }
@@ -228,6 +329,42 @@ void AnalysisPane::recalcFromCurrentContext() {
       "Load a CSV with columns in this order:\n"
       "Date, Target, Factor1, Factor2, ...\n\n"
       "The app will calculate daily returns and run factor regression.");
+}
+
+void AnalysisPane::loadFromWebSource() {
+  if (!impl_->providerBox || !impl_->targetEdit || !impl_->factorsEdit) {
+    return;
+  }
+
+  const auto provider = static_cast<StockTool::Domain::MarketProvider>(
+      impl_->providerBox->currentIndex() == 1 ? 1 : 0);
+  const QString targetInput = impl_->targetEdit->text();
+  const QStringList factorInputs = splitSymbols(impl_->factorsEdit->text());
+
+  struct CursorGuard {
+    CursorGuard() { QApplication::setOverrideCursor(Qt::WaitCursor); }
+    ~CursorGuard() { QApplication::restoreOverrideCursor(); }
+  } guard;
+
+  QString statusMessage;
+  StockTool::Domain::PriceCsvData fetchedData = fetchWebFactorCsv(
+      provider, targetInput, factorInputs, &statusMessage);
+  if (!fetchedData.ok) {
+    impl_->notes->setPlainText(statusMessage);
+    impl_->table->setRowCount(0);
+    impl_->sourceLabel->setText("Web fetch failed");
+    return;
+  }
+
+  impl_->loadedCsv = std::move(fetchedData);
+  impl_->loadedPath = QString("%1 web dataset").arg(
+      StockTool::Domain::marketProviderToString(provider));
+  impl_->sourceLabel->setText(
+      QString("%1 / %2")
+          .arg(StockTool::Domain::marketProviderToString(provider),
+               impl_->loadedCsv.headers.value(1)));
+
+  recalcFromCurrentContext();
 }
 
 void AnalysisPane::renderResult(const FactorModelResult &result,

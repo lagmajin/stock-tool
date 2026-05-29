@@ -1,6 +1,8 @@
 module;
 
+#include <QComboBox>
 #include <QString>
+#include <QLineEdit>
 #include <QWidget>
 
 export module Dock.AnalysisPane;
@@ -22,6 +24,7 @@ public:
 
 private:
   void recalcFromCurrentContext();
+  void loadFromWebSource();
   void renderResult(const StockTool::Domain::FactorModelResult &result,
                     const QString &contextLabel);
 };

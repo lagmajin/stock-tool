@@ -44,3 +44,16 @@ If QADS is installed through vcpkg, configure with your vcpkg toolchain and trip
 
 The sample CSV used by the initial factor-analysis flow is
 [data/sample_factor_history.csv](data/sample_factor_history.csv).
+
+## Web data
+
+In the `Factor Analysis` pane, use `Fetch Web` to pull daily closes from:
+
+- `Stooq`
+- `Yahoo Finance`
+
+Examples:
+
+- `7203` with `Stooq` normalizes to `7203.jp`
+- `AAPL` with `Yahoo Finance` stays `AAPL`
+- `^GSPC` works as an index symbol on Yahoo Finance

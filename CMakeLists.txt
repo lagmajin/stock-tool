@@ -10,7 +10,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 qt_standard_project_setup()
@@ -18,6 +18,7 @@ qt_standard_project_setup()
 set(STOCK_TOOL_MODULE_IFACES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/App/MainWindow.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Domain/FactorModel.ixx
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Domain/MarketData.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Domain/PriceCsv.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Dock/SymbolSearchPane.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Dock/WatchListPane.ixx
@@ -28,6 +29,7 @@ set(STOCK_TOOL_MODULE_IFACES
 set(STOCK_TOOL_MODULE_IMPLS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/App/MainWindow.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Domain/FactorModel.cppm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Domain/MarketData.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Domain/PriceCsv.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Dock/SymbolSearchPane.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Dock/WatchListPane.cppm
@@ -54,6 +56,7 @@ target_link_libraries(stock-tool
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        Qt6::Network
         ads::qtadvanceddocking-qt6
 )
 
