@@ -1,9 +1,8 @@
 module;
 
-#include <QApplication>
-#include <QComboBox>
-#include <QEventLoop>
 #include <QAbstractItemView>
+#include <QComboBox>
+#include <QFutureWatcher>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
@@ -18,6 +17,7 @@ module;
 #include <QTextEdit>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -55,6 +55,11 @@ QString formatPathLabel(const QString &path) {
 QStringList splitSymbols(const QString &text) {
   return text.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
 }
+
+struct WebFetchResult {
+  StockTool::Domain::PriceCsvData data;
+  QString statusMessage;
+};
 
 FactorModelResult runSampleFactorModel(const QString &symbol) {
   FactorSpec spec;
@@ -160,6 +165,15 @@ StockTool::Domain::PriceCsvData fetchWebFactorCsv(
   return data;
 }
 
+WebFetchResult fetchWebFactorCsvAsync(StockTool::Domain::MarketProvider provider,
+                                      QString targetSymbol,
+                                      QStringList factorSymbols) {
+  WebFetchResult result;
+  result.data = fetchWebFactorCsv(provider, targetSymbol, factorSymbols,
+                                  &result.statusMessage);
+  return result;
+}
+
 } // namespace
 
 class AnalysisPane::Impl {
@@ -174,6 +188,7 @@ public:
   QToolButton *loadButton = nullptr;
   QToolButton *recalcButton = nullptr;
   QToolButton *webFetchButton = nullptr;
+  QFutureWatcher<WebFetchResult> *webFetchWatcher = nullptr;
   StockTool::Domain::PriceCsvData loadedCsv;
   QString selectedSymbol;
   QString loadedPath;
@@ -286,6 +301,24 @@ AnalysisPane::AnalysisPane(QWidget *parent)
 
   connect(webFetchButton, &QToolButton::clicked, this,
           [this]() { loadFromWebSource(); });
+
+  impl_->webFetchWatcher = new QFutureWatcher<WebFetchResult>(this);
+  connect(impl_->webFetchWatcher, &QFutureWatcher<WebFetchResult>::finished,
+          this, [this]() {
+            setWebFetchBusy(false);
+            const WebFetchResult result = impl_->webFetchWatcher->result();
+            if (!result.data.ok) {
+              impl_->notes->setPlainText(result.statusMessage);
+              impl_->table->setRowCount(0);
+              impl_->sourceLabel->setText("Web fetch failed");
+              return;
+            }
+
+            impl_->loadedCsv = result.data;
+            impl_->loadedPath = result.data.sourcePath;
+            impl_->sourceLabel->setText(result.data.sourcePath);
+            recalcFromCurrentContext();
+          });
 }
 
 AnalysisPane::~AnalysisPane() { delete impl_; }
@@ -341,30 +374,35 @@ void AnalysisPane::loadFromWebSource() {
   const QString targetInput = impl_->targetEdit->text();
   const QStringList factorInputs = splitSymbols(impl_->factorsEdit->text());
 
-  struct CursorGuard {
-    CursorGuard() { QApplication::setOverrideCursor(Qt::WaitCursor); }
-    ~CursorGuard() { QApplication::restoreOverrideCursor(); }
-  } guard;
-
-  QString statusMessage;
-  StockTool::Domain::PriceCsvData fetchedData = fetchWebFactorCsv(
-      provider, targetInput, factorInputs, &statusMessage);
-  if (!fetchedData.ok) {
-    impl_->notes->setPlainText(statusMessage);
-    impl_->table->setRowCount(0);
-    impl_->sourceLabel->setText("Web fetch failed");
+  if (impl_->webFetchWatcher && impl_->webFetchWatcher->isRunning()) {
     return;
   }
 
-  impl_->loadedCsv = std::move(fetchedData);
-  impl_->loadedPath = QString("%1 web dataset").arg(
-      StockTool::Domain::marketProviderToString(provider));
-  impl_->sourceLabel->setText(
-      QString("%1 / %2")
-          .arg(StockTool::Domain::marketProviderToString(provider),
-               impl_->loadedCsv.headers.value(1)));
+  setWebFetchBusy(true);
+  impl_->notes->setPlainText(
+      QString("Fetching %1 series for %2 ...")
+          .arg(impl_->providerBox->currentText(), targetInput.trimmed()));
+  impl_->sourceLabel->setText("Fetching web data...");
 
-  recalcFromCurrentContext();
+  const auto future = QtConcurrent::run(
+      [provider, targetInput, factorInputs]() {
+        return fetchWebFactorCsvAsync(provider, targetInput, factorInputs);
+      });
+  impl_->webFetchWatcher->setFuture(future);
+}
+
+void AnalysisPane::setWebFetchBusy(bool busy) {
+  if (!impl_->loadButton || !impl_->recalcButton || !impl_->webFetchButton ||
+      !impl_->providerBox || !impl_->targetEdit || !impl_->factorsEdit) {
+    return;
+  }
+
+  impl_->loadButton->setEnabled(!busy);
+  impl_->recalcButton->setEnabled(!busy);
+  impl_->webFetchButton->setEnabled(!busy);
+  impl_->providerBox->setEnabled(!busy);
+  impl_->targetEdit->setEnabled(!busy);
+  impl_->factorsEdit->setEnabled(!busy);
 }
 
 void AnalysisPane::renderResult(const FactorModelResult &result,

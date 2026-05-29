@@ -10,7 +10,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Concurrent)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 qt_standard_project_setup()
@@ -57,6 +57,7 @@ target_link_libraries(stock-tool
         Qt6::Gui
         Qt6::Widgets
         Qt6::Network
+        Qt6::Concurrent
         ads::qtadvanceddocking-qt6
 )
 

@@ -1,6 +1,7 @@
 module;
 
 #include <QComboBox>
+#include <QFutureWatcher>
 #include <QString>
 #include <QLineEdit>
 #include <QWidget>
@@ -25,6 +26,7 @@ public:
 private:
   void recalcFromCurrentContext();
   void loadFromWebSource();
+  void setWebFetchBusy(bool busy);
   void renderResult(const StockTool::Domain::FactorModelResult &result,
                     const QString &contextLabel);
 };
