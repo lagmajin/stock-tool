@@ -41,3 +41,6 @@ cmake --build build
 ```
 
 If QADS is installed through vcpkg, configure with your vcpkg toolchain and triplet.
+
+The sample CSV used by the initial factor-analysis flow is
+[data/sample_factor_history.csv](data/sample_factor_history.csv).

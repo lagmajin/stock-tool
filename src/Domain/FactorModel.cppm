@@ -181,6 +181,9 @@ FactorModelResult runFactorRegression(
     result.fittedReturns.push_back(fitted);
     result.residuals.push_back(row.targetReturn - fitted);
   }
+  result.fitSeries.actualReturns = targetReturns;
+  result.fitSeries.fittedReturns = result.fittedReturns;
+  result.fitSeries.residuals = result.residuals;
 
   const double targetMean = mean(targetReturns);
   double sse = 0.0;

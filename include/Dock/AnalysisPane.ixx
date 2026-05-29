@@ -5,6 +5,8 @@ module;
 
 export module Dock.AnalysisPane;
 
+import Domain.FactorModel;
+
 export namespace StockTool::Dock {
 
 class AnalysisPane final : public QWidget {
@@ -17,6 +19,11 @@ public:
   ~AnalysisPane() override;
 
   void setSymbol(const QString &symbol);
+
+private:
+  void recalcFromCurrentContext();
+  void renderResult(const StockTool::Domain::FactorModelResult &result,
+                    const QString &contextLabel);
 };
 
 } // namespace StockTool::Dock

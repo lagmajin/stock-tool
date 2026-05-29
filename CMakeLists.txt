@@ -18,6 +18,7 @@ qt_standard_project_setup()
 set(STOCK_TOOL_MODULE_IFACES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/App/MainWindow.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Domain/FactorModel.ixx
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Domain/PriceCsv.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Dock/SymbolSearchPane.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Dock/WatchListPane.ixx
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Dock/ChartPane.ixx
@@ -27,6 +28,7 @@ set(STOCK_TOOL_MODULE_IFACES
 set(STOCK_TOOL_MODULE_IMPLS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/App/MainWindow.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Domain/FactorModel.cppm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Domain/PriceCsv.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Dock/SymbolSearchPane.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Dock/WatchListPane.cppm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Dock/ChartPane.cppm

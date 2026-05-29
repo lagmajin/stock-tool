@@ -17,6 +17,12 @@ struct FactorSpec {
   bool includeIntercept = true;
 };
 
+struct FactorFitSeries {
+  std::vector<double> actualReturns;
+  std::vector<double> fittedReturns;
+  std::vector<double> residuals;
+};
+
 struct FactorExposure {
   std::string name;
   double beta = 0.0;
@@ -33,6 +39,7 @@ struct FactorModelResult {
   std::vector<double> fittedReturns;
   std::vector<double> residuals;
   std::string verdict;
+  FactorFitSeries fitSeries;
 };
 
 FactorModelResult runFactorRegression(const FactorSpec &spec,
